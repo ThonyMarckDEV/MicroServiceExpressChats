@@ -1,0 +1,23 @@
+{
+  "name": "youtube-watch-party-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.14.0",
+    "shortid": "^2.2.17",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2",
+    "youtube-watch-party-backend": "file:"
+  }
+}
