@@ -7,5 +7,7 @@ const router = express.Router();
 
 router.get('/:id', authenticateToken, getChat);
 router.post('/:id/messages', authenticateToken, sendMessage);
-
 router.post('/:id/mark-as-read', authenticateToken, markMessagesAsReadController);
+
+// 💡 ESTA LÍNEA ES CLAVE:
+module.exports = router;
