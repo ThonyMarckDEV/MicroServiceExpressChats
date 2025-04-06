@@ -1,4 +1,4 @@
-const { verifyChatAccess, createMessage, getMessageById , markMessagesAsRead } = require('../services/messageService');
+const { verifyChatAccess, createMessage, getMessageById, markMessagesAsReadService } = require('../services/messageService');
 
 const sendMessage = async (req, res) => {
   try {
@@ -18,8 +18,10 @@ const sendMessage = async (req, res) => {
     const messageId = await createMessage(chatId, userId, contenido);
     const message = await getMessageById(messageId);
     
-    // El WebSocket se manejará en el servicio de sockets
-    req.io.to(`chat_${chatId}`).emit('new_message', message);
+    // Verificar que req.io existe antes de usarlo
+    if (req.io) {
+      req.io.to(`chat_${chatId}`).emit('new_message', message);
+    }
     
     res.status(201).json(message);
     
@@ -44,14 +46,17 @@ const markMessagesAsReadController = async (req, res) => {
     }
     
     // Marcar mensajes como leídos
-    const result = await markMessagesAsRead(chatId, userId);
+    const result = await markMessagesAsReadService(chatId, userId);
     
     // Emitir evento WebSocket
-    req.io.to(`chat_${chatId}`).emit('messages_read', {
-      chatId,
-      userId,
-      count: result.affectedRows
-    });
+    // Verificar que req.io existe antes de usarlo
+    if (req.io) {
+      req.io.to(`chat_${chatId}`).emit('messages_read', {
+        chatId,
+        userId,
+        count: result.affectedRows
+      });
+    }
     
     res.json({ 
       success: true, 
