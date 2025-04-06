@@ -65,6 +65,9 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
+
+
+
 // Middleware para WebSockets
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
@@ -159,6 +162,38 @@ app.get('/api/chats/:id', authenticateToken, async (req, res) => {
   }
 });
 
+app.post('/api/chats/:id/mark-as-read', authenticateToken, async (req, res) => {
+  try {
+    const chatId = req.params.id;
+    const userId = req.user.id;
+    
+    // Verificar que el usuario tiene acceso a este chat
+    const [chat] = await pool.query(`
+      SELECT c.* FROM chats c
+      WHERE c.idChat = ? AND (c.idCliente = ? OR c.idEncargado = ?)
+    `, [chatId, userId, userId]);
+    
+    if (!chat.length) {
+      return res.status(404).json({ message: 'Chat no encontrado o no autorizado' });
+    }
+    
+    // Marcar como leídos solo los mensajes dirigidos al usuario actual
+    // (es decir, los mensajes que el usuario NO envió)
+    const [result] = await pool.query(`
+      UPDATE mensajes SET leido = 1 
+      WHERE idChat = ? AND idUsuario != ? AND leido = 0
+    `, [chatId, userId]);
+    
+    res.status(200).json({ 
+      message: 'Mensajes marcados como leídos',
+      updatedCount: result.affectedRows
+    });
+    
+  } catch (error) {
+    console.error('Error al marcar mensajes como leídos:', error);
+    res.status(500).json({ message: 'Error al marcar mensajes como leídos' });
+  }
+});
 
 app.post('/api/chats/:id/messages', authenticateToken, async (req, res) => {
   try {
