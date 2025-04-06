@@ -1,4 +1,4 @@
-const { verifyChatAccess, createMessage, getMessageById } = require('../services/messageService');
+const { verifyChatAccess, createMessage, getMessageById , markMessagesAsRead } = require('../services/messageService');
 
 const sendMessage = async (req, res) => {
   try {
@@ -29,4 +29,44 @@ const sendMessage = async (req, res) => {
   }
 };
 
-module.exports = { sendMessage };
+/**
+ * Marca los mensajes de un chat como leídos
+ */
+const markMessagesAsReadController = async (req, res) => {
+  try {
+    const chatId = req.params.id;
+    const userId = req.user.id;
+    
+    // Verificar acceso al chat
+    const hasAccess = await verifyChatAccess(chatId, userId);
+    if (!hasAccess) {
+      return res.status(404).json({ message: 'Chat no encontrado o no autorizado' });
+    }
+    
+    // Marcar mensajes como leídos
+    const result = await markMessagesAsRead(chatId, userId);
+    
+    // Emitir evento WebSocket
+    req.io.to(`chat_${chatId}`).emit('messages_read', {
+      chatId,
+      userId,
+      count: result.affectedRows
+    });
+    
+    res.json({ 
+      success: true, 
+      count: result.affectedRows 
+    });
+    
+  } catch (error) {
+    console.error('Error al marcar mensajes como leídos:', error);
+    res.status(500).json({ 
+      message: 'Error al marcar mensajes como leídos' 
+    });
+  }
+};
+
+module.exports = {
+  markMessagesAsReadController,
+  sendMessage
+};

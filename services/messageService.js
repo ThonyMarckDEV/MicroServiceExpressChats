@@ -32,8 +32,21 @@ const verifyChatAccess = async (chatId, userId) => {
   return chat.length > 0;
 };
 
+/**
+ * Marca los mensajes no leídos de un chat como leídos
+ */
+const markMessagesAsRead = async (chatId, userId) => {
+  const [result] = await pool.query(`
+    UPDATE mensajes SET leido = 1 
+    WHERE idChat = ? AND idUsuario != ? AND leido = 0
+  `, [chatId, userId]);
+  
+  return result;
+};
+
 module.exports = {
   createMessage,
   getMessageById,
-  verifyChatAccess
+  verifyChatAccess,
+  markMessagesAsRead
 };
