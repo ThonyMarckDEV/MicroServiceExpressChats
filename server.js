@@ -174,62 +174,6 @@ app.get('/api/chats/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// app.post('/api/chats/:id/mark-as-read', authenticateToken, async (req, res) => {
-//   try {
-//     const chatId = req.params.id;
-//     const userId = req.user.id;
-//     const { isActive, inView } = req.body;
-    
-//     // Solo proceder si el usuario está activo y el chat está en vista
-//     if (!isActive || !inView) {
-//       return res.status(200).json({ 
-//         message: 'No se marcaron mensajes como leídos porque el usuario no está activo o el chat no está en vista',
-//         updatedCount: 0
-//       });
-//     }
-    
-//     // Verificar que el usuario tiene acceso a este chat
-//     const [chat] = await pool.query(`
-//       SELECT c.* FROM chats c
-//       WHERE c.idChat = ? AND (c.idCliente = ? OR c.idEncargado = ?)
-//     `, [chatId, userId, userId]);
-    
-//     if (!chat.length) {
-//       return res.status(404).json({ message: 'Chat no encontrado o no autorizado' });
-//     }
-    
-//     // Marcar como leídos solo los mensajes dirigidos al usuario actual
-//     // (es decir, los mensajes que el usuario NO envió)
-//     const [result] = await pool.query(`
-//       UPDATE mensajes SET leido = 1 
-//       WHERE idChat = ? AND idUsuario != ? AND leido = 0
-//     `, [chatId, userId]);
-    
-//     // Si se marcaron mensajes como leídos, notificar al remitente
-//     if (result.affectedRows > 0) {
-//       // Determinar el ID del remitente (el otro usuario del chat)
-//       const remitentId = userId === parseInt(chat[0].idCliente) 
-//         ? chat[0].idEncargado 
-//         : chat[0].idCliente;
-        
-//       // Emitir evento para informar que los mensajes fueron leídos
-//       io.to(`user_${remitentId}`).emit('messages_read_status', {
-//         chatId,
-//         readBy: userId
-//       });
-//     }
-    
-//     res.status(200).json({ 
-//       message: 'Mensajes marcados como leídos',
-//       updatedCount: result.affectedRows
-//     });
-    
-//   } catch (error) {
-//     console.error('Error al marcar mensajes como leídos:', error);
-//     res.status(500).json({ message: 'Error al marcar mensajes como leídos' });
-//   }
-// });
-
 app.post('/api/chats/:id/mark-as-read', authenticateToken, async (req, res) => {
   try {
     const chatId = req.params.id;
