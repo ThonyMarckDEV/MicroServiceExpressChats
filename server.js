@@ -17,14 +17,6 @@ const dbConfig = {
   database: process.env.DB_DATABASE || 'constructoraesmeraldadb'
 };
 
-// Configuración de la base de datos docker
-// const dbConfig = {
-//   host: process.env.DB_HOST || '172.17.0.2',
-//   port: process.env.DB_PORT || 3306,
-//   user: process.env.DB_USERNAME || 'root',
-//   password: process.env.DB_PASSWORD || 'esmeralda123',
-//   database: process.env.DB_DATABASE || 'constructoraesmeraldadb'
-// };
 
 let pool;
 
