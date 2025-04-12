@@ -90,6 +90,13 @@ io.use((socket, next) => {
 initializeDbPool();
 
 
+// Inyectar io en cada request
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
+
 // Rutas HTTP para el chat
 app.get('/api/chats/:id', authenticateToken, async (req, res) => {
   try {
