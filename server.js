@@ -106,12 +106,16 @@ app.get('/api/chats/:id', authenticateToken, async (req, res) => {
     // Verificar que el usuario tiene acceso a este chat y obtener información de participantes
     const [chat] = await pool.query(`
       SELECT c.*, 
-        cli.nombre as cliente_nombre, cli.apellido as cliente_apellido, cli.rol as cliente_rol,
-        enc.nombre as encargado_nombre, enc.apellido as encargado_apellido, enc.rol as encargado_rol,
+        cli_datos.nombre as cliente_nombre, cli_datos.apellido as cliente_apellido, cli_rol.nombre as cliente_rol,
+        enc_datos.nombre as encargado_nombre, enc_datos.apellido as encargado_apellido, enc_rol.nombre as encargado_rol,
         p.nombre as proyecto_nombre
       FROM chats c
       JOIN usuarios cli ON c.idCliente = cli.idUsuario
+      JOIN datos cli_datos ON cli.idDatos = cli_datos.idDatos
+      JOIN roles cli_rol ON cli.idRol = cli_rol.idRol
       JOIN usuarios enc ON c.idEncargado = enc.idUsuario
+      JOIN datos enc_datos ON enc.idDatos = enc_datos.idDatos
+      JOIN roles enc_rol ON enc.idRol = enc_rol.idRol
       JOIN proyectos p ON c.idProyecto = p.idProyecto
       WHERE c.idChat = ? AND (c.idCliente = ? OR c.idEncargado = ?)
     `, [chatId, userId, userId]);
@@ -122,9 +126,11 @@ app.get('/api/chats/:id', authenticateToken, async (req, res) => {
     
     // Obtener mensajes del chat
     const [messages] = await pool.query(`
-      SELECT m.*, u.nombre as nombreUsuario, u.rol as rolUsuario 
+      SELECT m.*, d.nombre as nombreUsuario, r.nombre as rolUsuario 
       FROM mensajes m
       JOIN usuarios u ON m.idUsuario = u.idUsuario
+      JOIN datos d ON u.idDatos = d.idDatos
+      JOIN roles r ON u.idRol = r.idRol
       WHERE m.idChat = ?
       ORDER BY m.created_at ASC
     `, [chatId]);
@@ -250,9 +256,11 @@ app.post('/api/chats/:id/messages', authenticateToken, async (req, res) => {
     
     // Obtener el mensaje recién creado con info del usuario
     const [message] = await pool.query(`
-      SELECT m.*, u.nombre as nombreUsuario, u.rol as rolUsuario 
+      SELECT m.*, d.nombre as nombreUsuario, r.nombre as rolUsuario 
       FROM mensajes m
       JOIN usuarios u ON m.idUsuario = u.idUsuario
+      JOIN datos d ON u.idDatos = d.idDatos
+      JOIN roles r ON u.idRol = r.idRol
       WHERE m.idMensaje = ?
     `, [result.insertId]);
     
