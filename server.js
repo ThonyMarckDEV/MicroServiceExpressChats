@@ -10,13 +10,15 @@ dotenv.config();
 
 // Configuración de la base de datos
 const dbConfig = {
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: process.env.DB_PORT || 3306,
-  user: process.env.DB_USERNAME || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_DATABASE || 'constructoraesmeraldadb'
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  user: process.env.DB_USERNAME,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_DATABASE
 };
 
+// Secreto para JWT
+const JWT_SECRET = process.env.JWT_SECRET;
 
 let pool;
 
@@ -30,8 +32,7 @@ async function initializeDbPool() {
   }
 }
 
-// Secreto para JWT
-const JWT_SECRET = 'nOmqvtdTm2IraPAKSHTpuLoBmNE30P0GTc7VTmgqtJldLUtbOOKIB1tJconVJ0nr';
+
 
 // Crear instancia de Express
 const app = express();
