@@ -1,0 +1,411 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const mysql = require('mysql2/promise');
+const dotenv = require('dotenv');
+
+dotenv.config();
+
+// Configuración de la base de datos
+const dbConfig = {
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  user: process.env.DB_USERNAME,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_DATABASE
+};
+
+// Secreto para JWT
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// Orígenes permitidos (CORS) separados por coma
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:3000,https://constructora-esmeralda.vercel.app')
+  .split(',').map((o) => o.trim()).filter(Boolean);
+
+const MAX_MENSAJE = 2000;
+
+// Verifica un access token: firma HS256, vigencia y que NO sea refresh token
+const verifyAccessToken = (token) => {
+  const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+  if (decoded.type === 'refresh') throw new Error('Refresh token no permitido');
+  return { id: Number(decoded.sub), role: decoded.rol };
+};
+
+const toChatId = (value) => {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+};
+
+let pool;
+
+async function initializeDbPool() {
+  try {
+    pool = mysql.createPool(dbConfig);
+    console.log('Conexión a la base de datos establecida');
+  } catch (error) {
+    console.error('Error al conectar a la base de datos:', error);
+    process.exit(1);
+  }
+}
+
+
+
+// Crear instancia de Express
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: ALLOWED_ORIGINS,
+    methods: ["GET", "POST"]
+  },
+  maxHttpBufferSize: 1e5
+});
+
+// Middlewares
+app.disable('x-powered-by');
+app.use(cors({ origin: ALLOWED_ORIGINS }));
+app.use(express.json({ limit: '20kb' }));
+
+// Middleware para verificar token JWT (HTTP)
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  
+  if (!token) return res.status(401).json({ message: 'Token no proporcionado' });
+  
+  try {
+    req.user = verifyAccessToken(token);
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: 'Token inválido' });
+  }
+};
+
+// Middleware para WebSockets
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token;
+  
+  if (!token) return next(new Error('Token no proporcionado'));
+  
+  try {
+    socket.user = verifyAccessToken(token);
+    next();
+  } catch (err) {
+    return next(new Error('Token inválido'));
+  }
+});
+
+// Inicializar pool de conexiones
+initializeDbPool();
+
+// Inyectar io en cada request
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
+// Rastrear usuarios activos por chat
+const activeUsers = {};
+const userSockets = {};
+
+// Rutas HTTP para el chat
+app.get('/api/chats/:id', authenticateToken, async (req, res) => {
+  try {
+    const chatId = req.params.id;
+    const userId = req.user.id;
+    
+    // Verificar que el usuario tiene acceso a este chat y obtener información de participantes
+    const [chat] = await pool.query(`
+      SELECT c.*, 
+        cli_datos.nombre as cliente_nombre, cli_datos.apellido as cliente_apellido, cli_rol.nombre as cliente_rol,
+        enc_datos.nombre as encargado_nombre, enc_datos.apellido as encargado_apellido, enc_rol.nombre as encargado_rol,
+        p.nombre as proyecto_nombre
+      FROM chats c
+      JOIN usuarios cli ON c.idCliente = cli.idUsuario
+      JOIN datos cli_datos ON cli.idDatos = cli_datos.idDatos
+      JOIN roles cli_rol ON cli.idRol = cli_rol.idRol
+      JOIN usuarios enc ON c.idEncargado = enc.idUsuario
+      JOIN datos enc_datos ON enc.idDatos = enc_datos.idDatos
+      JOIN roles enc_rol ON enc.idRol = enc_rol.idRol
+      JOIN proyectos p ON c.idProyecto = p.idProyecto
+      WHERE c.idChat = ? AND (c.idCliente = ? OR c.idEncargado = ?)
+    `, [chatId, userId, userId]);
+    
+    if (!chat.length) {
+      return res.status(404).json({ message: 'Chat no encontrado o no autorizado' });
+    }
+    
+    // Obtener mensajes del chat
+    const [messages] = await pool.query(`
+      SELECT m.*, d.nombre as nombreUsuario, r.nombre as rolUsuario 
+      FROM mensajes m
+      JOIN usuarios u ON m.idUsuario = u.idUsuario
+      JOIN datos d ON u.idDatos = d.idDatos
+      JOIN roles r ON u.idRol = r.idRol
+      WHERE m.idChat = ?
+      ORDER BY m.created_at ASC
+    `, [chatId]);
+    
+    // No marcar automáticamente como leído al cargar, esperamos que el cliente confirme
+    // que está activo y visualizando el chat
+    
+    res.json({
+      chat: {
+        idChat: chat[0].idChat,
+        idCliente: chat[0].idCliente,
+        idEncargado: chat[0].idEncargado,
+        idProyecto: chat[0].idProyecto,
+        created_at: chat[0].created_at,
+        updated_at: chat[0].updated_at
+      },
+      cliente: {
+        idUsuario: chat[0].idCliente,
+        nombre: chat[0].cliente_nombre,
+        apellido: chat[0].cliente_apellido,
+        rol: chat[0].cliente_rol
+      },
+      encargado: {
+        idUsuario: chat[0].idEncargado,
+        nombre: chat[0].encargado_nombre,
+        apellido: chat[0].encargado_apellido,
+        rol: chat[0].encargado_rol
+      },
+      proyecto: {
+        idProyecto: chat[0].idProyecto,
+        nombre: chat[0].proyecto_nombre
+      },
+      messages
+    });
+    
+  } catch (error) {
+    console.error('Error al obtener chat:', error);
+    res.status(500).json({ message: 'Error al obtener chat' });
+  }
+});
+
+app.post('/api/chats/:id/mark-as-read', authenticateToken, async (req, res) => {
+  try {
+    const chatId = req.params.id;
+    const userId = req.user.id;
+    const { isActive, inView } = req.body;
+    
+    // Solo proceder si el usuario está activo y el chat está en vista
+    if (!isActive || !inView) {
+      return res.status(200).json({ 
+        message: 'No se marcaron mensajes como leídos porque el usuario no está activo o el chat no está en vista',
+        updatedCount: 0
+      });
+    }
+    
+    // Verificar que el usuario tiene acceso a este chat
+    const [chat] = await pool.query(`
+      SELECT c.* FROM chats c
+      WHERE c.idChat = ? AND (c.idCliente = ? OR c.idEncargado = ?)
+    `, [chatId, userId, userId]);
+    
+    if (!chat.length) {
+      return res.status(404).json({ message: 'Chat no encontrado o no autorizado' });
+    }
+    
+    // Marcar como leídos solo los mensajes dirigidos al usuario actual
+    // (es decir, los mensajes que el usuario NO envió)
+    const [result] = await pool.query(`
+      UPDATE mensajes SET leido = 1 
+      WHERE idChat = ? AND idUsuario != ? AND leido = 0
+    `, [chatId, userId]);
+    
+    // Si se marcaron mensajes como leídos, notificar al remitente
+    if (result.affectedRows > 0) {
+      // Determinar el ID del remitente (el otro usuario del chat)
+      const remitentId = userId === parseInt(chat[0].idCliente) 
+        ? chat[0].idEncargado 
+        : chat[0].idCliente;
+        
+      // Emitir evento para informar que los mensajes fueron leídos
+      io.to(`user_${remitentId}`).emit('messages_read_status', {
+        chatId,
+        readBy: userId
+      });
+    }
+    
+    res.status(200).json({ 
+      message: 'Mensajes marcados como leídos',
+      updatedCount: result.affectedRows
+    });
+    
+  } catch (error) {
+    console.error('Error al marcar mensajes como leídos:', error);
+    res.status(500).json({ message: 'Error al marcar mensajes como leídos' });
+  }
+});
+
+app.post('/api/chats/:id/messages', authenticateToken, async (req, res) => {
+  try {
+    const chatId = req.params.id;
+    const userId = req.user.id;
+    const contenido = typeof req.body?.contenido === 'string' ? req.body.contenido.trim() : '';
+    
+    if (!contenido) {
+      return res.status(400).json({ message: 'El contenido del mensaje es requerido' });
+    }
+    if (contenido.length > MAX_MENSAJE) {
+      return res.status(413).json({ message: `El mensaje supera los ${MAX_MENSAJE} caracteres` });
+    }
+    
+    // Verificar que el usuario tiene acceso a este chat
+    const [chat] = await pool.query(`
+      SELECT c.* FROM chats c
+      WHERE c.idChat = ? AND (c.idCliente = ? OR c.idEncargado = ?)
+    `, [chatId, userId, userId]);
+    
+    if (!chat.length) {
+      return res.status(404).json({ message: 'Chat no encontrado o no autorizado' });
+    }
+    
+    // Insertar mensaje
+    const [result] = await pool.query(`
+      INSERT INTO mensajes (idChat, idUsuario, contenido, leido, created_at, updated_at)
+      VALUES (?, ?, ?, 0, NOW() , NOW())
+    `, [chatId, userId, contenido]);
+    
+    // Obtener el mensaje recién creado con info del usuario
+    const [message] = await pool.query(`
+      SELECT m.*, d.nombre as nombreUsuario, r.nombre as rolUsuario 
+      FROM mensajes m
+      JOIN usuarios u ON m.idUsuario = u.idUsuario
+      JOIN datos d ON u.idDatos = d.idDatos
+      JOIN roles r ON u.idRol = r.idRol
+      WHERE m.idMensaje = ?
+    `, [result.insertId]);
+    
+    // Emitir el mensaje a través de WebSocket
+    io.to(`chat_${chatId}`).emit('new_message', message[0]);
+    
+    res.status(201).json(message[0]);
+    
+  } catch (error) {
+    console.error('Error al enviar mensaje:', error);
+    res.status(500).json({ message: 'Error al enviar mensaje' });
+  }
+});
+
+// WebSocket connections
+io.on('connection', (socket) => {
+  console.log(`Usuario conectado: ${socket.user.id} (${socket.user.role})`);
+  
+  // Guardar referencia del socket por usuario
+  userSockets[socket.user.id] = socket.id;
+  
+  // Automáticamente unir al usuario a su sala personal para notificaciones
+  socket.join(`user_${socket.user.id}`);
+  
+  // Unirse a las salas de chat relevantes
+  // Los eventos de un chat solo se aceptan si el socket ya se unió (membresía verificada en join_chat)
+  const inChat = (chatId) => chatId && socket.rooms.has(`chat_${chatId}`);
+
+  socket.on('join_chat', async (rawId) => {
+    const chatId = toChatId(rawId);
+    if (!chatId) return;
+    try {
+      // Verificar que el usuario tiene acceso a este chat
+      const [chat] = await pool.query(`
+        SELECT c.* FROM chats c
+        WHERE c.idChat = ? AND (c.idCliente = ? OR c.idEncargado = ?)
+      `, [chatId, socket.user.id, socket.user.id]);
+      
+      if (chat.length) {
+        socket.join(`chat_${chatId}`);
+        console.log(`Usuario ${socket.user.id} se unió al chat ${chatId}`);
+        
+        // Registrar usuario como activo en este chat
+        if (!activeUsers[chatId]) {
+          activeUsers[chatId] = {};
+        }
+        activeUsers[chatId][socket.user.id] = true;
+        
+        // Notificar a otros usuarios en el chat
+        socket.to(`chat_${chatId}`).emit('user_joined', {
+          userId: socket.user.id,
+          chatId
+        });
+      }
+    } catch (error) {
+      console.error('Error al unirse al chat:', error);
+    }
+  });
+  
+  // Salir del chat
+  socket.on('leave_chat', (rawId) => {
+    const chatId = toChatId(rawId);
+    if (!inChat(chatId)) return;
+    socket.leave(`chat_${chatId}`);
+    console.log(`Usuario ${socket.user.id} salió del chat ${chatId}`);
+    
+    // Marcar como inactivo
+    if (activeUsers[chatId]) {
+      delete activeUsers[chatId][socket.user.id];
+    }
+    
+    // Notificar a otros usuarios
+    socket.to(`chat_${chatId}`).emit('user_left', {
+      userId: socket.user.id,
+      chatId
+    });
+  });
+  
+  // Manejar notificación de usuario activo
+  socket.on('user_active', (payload) => {
+    const chatId = toChatId(payload?.chatId);
+    if (!inChat(chatId)) return;
+    if (!activeUsers[chatId]) {
+      activeUsers[chatId] = {};
+    }
+    activeUsers[chatId][socket.user.id] = true;
+    
+    socket.to(`chat_${chatId}`).emit('user_status_change', {
+      userId: socket.user.id,
+      chatId,
+      status: 'active'
+    });
+  });
+  
+  // Manejar señal de mensajes leídos
+  socket.on('messages_read', (rawId) => {
+    const chatId = toChatId(rawId);
+    if (!inChat(chatId)) return;
+    socket.to(`chat_${chatId}`).emit('messages_read_status', {
+      chatId,
+      readBy: socket.user.id
+    });
+  });
+  
+  // Manejar desconexión
+  socket.on('disconnect', () => {
+    console.log(`Usuario desconectado: ${socket.user.id}`);
+    
+    // Limpiar referencias
+    delete userSockets[socket.user.id];
+    
+    // Marcar como inactivo en todos los chats
+    Object.keys(activeUsers).forEach(chatId => {
+      if (activeUsers[chatId][socket.user.id]) {
+        delete activeUsers[chatId][socket.user.id];
+        
+        // Notificar a otros usuarios
+        io.to(`chat_${chatId}`).emit('user_status_change', {
+          userId: socket.user.id,
+          chatId,
+          status: 'inactive'
+        });
+      }
+    });
+  });
+});
+
+// Iniciar servidor
+const PORT = process.env.PORT;
+server.listen(PORT, () => {
+  console.log(`Servidor escuchando en el puerto ${PORT}`);
+});
