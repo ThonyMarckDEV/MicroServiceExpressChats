@@ -8,13 +8,13 @@ WORKDIR /app
 COPY package*.json ./
 
 # Instala las dependencias
-RUN npm install
+RUN npm ci --omit=dev
 
 # Copia el resto de los archivos del proyecto
 COPY . .
 
 # Expone el puerto en el que corre tu app (ajústalo si usas otro)
-EXPOSE 3000
+EXPOSE 3001
 
 # Comando para iniciar la aplicación
 CMD ["node", "server.js"]
